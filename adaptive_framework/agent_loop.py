@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, TypedDict, Union
 import logging
 
-from adaptive_framework.core import Plugin, Framework, Event
+from adaptive_framework.core import Framework, Event
 from adaptive_framework.memory import MemoryManager, MemoryEntry
 from adaptive_framework.vector_memory import VectorMemoryManager
 
@@ -85,10 +85,8 @@ class ReActAgent:
                  framework: Framework,
                  memory: MemoryManager,
                  vector_memory: Optional[VectorMemoryManager] = None,
-                 llm_provider = None,
-                 adaptive_framework = None):
+                 llm_provider = None):
         self.framework = framework
-        self.adaptive_framework = adaptive_framework
         self.memory = memory
         self.vector_memory = vector_memory
         self.llm_provider = llm_provider
@@ -310,8 +308,7 @@ Decide the next action. Respond with JSON:
         
         # Execute via framework
         try:
-            executor = self.adaptive_framework if self.adaptive_framework else self.framework
-            result = await executor.execute(action, parameters)
+            result = await self.framework.execute(action, parameters)
             
             # Update task status
             if state["current_task"]:
@@ -530,10 +527,9 @@ Decide the next action. Respond with JSON:
 class AgentLoopPlugin(Plugin):
     """Plugin exposing the ReAct agent loop."""
     
-    def __init__(self, name: str, framework: Framework, adaptive_framework = None):
+    def __init__(self, name: str, framework: Framework):
         super().__init__(name, framework)
         self.agent: Optional[ReActAgent] = None
-        self.adaptive_framework = adaptive_framework
     
     @property
     def version(self) -> str:
@@ -559,7 +555,7 @@ class AgentLoopPlugin(Plugin):
         except Exception as e:
             logger.warning(f"Vector memory not available: {e}")
         
-        self.agent = ReActAgent(self.framework, memory, vector_memory, adaptive_framework=self.adaptive_framework)
+        self.agent = ReActAgent(self.framework, memory, vector_memory)
         
         self.framework.event_bus.subscribe("agent.run", self._handle_run)
         self.framework.event_bus.subscribe("agent.pause", self._handle_pause)

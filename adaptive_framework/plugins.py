@@ -37,19 +37,18 @@ class FileOperationsPlugin(Plugin):
     
     async def _handle_read(self, event: Event):
         path = Path(event.payload.get("path", ""))
-        request_id = event.payload.get("request_id")
         if path.exists() and path.is_file():
             content = path.read_text()
             await self.framework.event_bus.publish(Event("file.read.result", {
-                "request_id": request_id,
+                "request_id": event.payload.get("request_id"),
                 "path": str(path),
                 "content": content
             }))
         else:
-            await self.framework.event_bus.publish(Event("file.read.result", {
-                "request_id": request_id,
+            await self.framework.event_bus.publish(Event("file.read.error", {
+                "request_id": event.payload.get("request_id"),
                 "path": str(path),
-                "error": "File not found or is a directory"
+                "error": "File not found"
             }))
     
     async def _handle_write(self, event: Event):
@@ -75,7 +74,6 @@ class FileOperationsPlugin(Plugin):
     async def _handle_search(self, event: Event):
         path = Path(event.payload.get("path", "."))
         query = event.payload.get("query", "")
-        # Simple grep-like search
         results = []
         for file_path in path.rglob("*"):
             if file_path.is_file() and file_path.suffix in ['.py', '.txt', '.md', '.json', '.js', '.ts']:
@@ -399,6 +397,10 @@ class LearningPlugin(Plugin):
 class UserFeedbackPlugin(Plugin):
     """Plugin for collecting and processing user feedback."""
     
+    def __init__(self, name: str, framework: Framework, memory_manager: MemoryManager):
+        super().__init__(name, framework)
+        self.memory = memory_manager
+    
     @property
     def version(self) -> str:
         return "1.0.0"
@@ -406,10 +408,6 @@ class UserFeedbackPlugin(Plugin):
     @property
     def capabilities(self) -> List[str]:
         return ["collect_feedback", "process_correction", "get_feedback_stats"]
-    
-    def __init__(self, name: str, framework: Framework, memory_manager: MemoryManager):
-        super().__init__(name, framework)
-        self.memory = memory_manager
     
     async def initialize(self) -> bool:
         self.framework.event_bus.subscribe("feedback.submit", self._handle_feedback)
@@ -459,16 +457,18 @@ class UserFeedbackPlugin(Plugin):
         }))
     
     async def _handle_stats(self, event: Event):
-        """Get feedback statistics."""
-        # Query corrections and feedback
-        corrections = await self.memory.recall(type="correction", min_confidence=0.5)
+            """Get feedback statistics."""
+            # Query corrections and feedback
+            corrections = await self.memory.recall(type="correction", min_confidence=0.5)
         
-        await self.framework.event_bus.publish(Event("feedback.stats.result", {
-            "request_id": event.payload.get("request_id"),
-            "total_corrections": len(corrections),
-            "recent_corrections": len([c for c in corrections 
-                                        if (datetime.now() - c.created_at).days < 7])
-        }))
+            recent_count = len([c for c in corrections 
+                               if (datetime.now() - c.created_at).days < 7])
+        
+            await self.framework.event_bus.publish(Event("feedback.stats.result", {
+                "request_id": event.payload.get("request_id"),
+                "total_corrections": len(corrections),
+                "recent_corrections": recent_count
+            }))
 
 
 # Import datetime for the feedback plugin

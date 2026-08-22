@@ -29,7 +29,7 @@ class MemoryEntry:
     access_count: int = 0
     last_accessed: Optional[datetime] = None
     tags: Set[str] = field(default_factory=set)
-    feedback: List[Dict[str, Any]] = field(default_factory=list)  # positive/negative feedback
+    feedback: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -102,29 +102,15 @@ class SQLiteMemoryStore(MemoryStore):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tags ON memories(tags)")
     
     def _row_to_entry(self, row) -> MemoryEntry:
-        # Handle potential schema mismatch where columns might be shifted
-        # Expected columns: id, type, content, context, confidence, source, created_at, updated_at, access_count, last_accessed, tags, feedback
-        # If source is a datetime string, columns are shifted
-        source_val = row[5]
-        created_at_val = row[6]
-        updated_at_val = row[7]
-        
-        # Check if columns are shifted (source contains datetime-like string)
-        if source_val and ('T' in source_val or '-' in source_val) and len(source_val) > 10:
-            # Columns are shifted - source is actually created_at, created_at is updated_at, etc.
-            created_at_val = source_val
-            updated_at_val = row[6]
-            source_val = "system"  # default
-        
         return MemoryEntry(
             id=row[0],
             type=row[1],
             content=json.loads(row[2]),
             context=json.loads(row[3]),
             confidence=row[4],
-            source=source_val,
-            created_at=datetime.fromisoformat(created_at_val) if created_at_val else datetime.now(),
-            updated_at=datetime.fromisoformat(updated_at_val) if updated_at_val else datetime.now(),
+            source=row[5],
+            created_at=datetime.fromisoformat(row[6]),
+            updated_at=datetime.fromisoformat(row[7]),
             access_count=row[8],
             last_accessed=datetime.fromisoformat(row[9]) if row[9] else None,
             tags=set(json.loads(row[10])),
@@ -185,7 +171,6 @@ class SQLiteMemoryStore(MemoryStore):
             results = [self._row_to_entry(r) for r in rows]
             
             if context_match:
-                # Filter by context similarity (simple key overlap)
                 filtered = []
                 for entry in results:
                     overlap = sum(1 for k, v in context_match.items() 
@@ -410,3 +395,7 @@ class SkillMemory:
         # Simple: return parameters from most confident successful pattern
         best = max(successful, key=lambda p: p.confidence)
         return best.content.get("data", {}).get("parameters", {})
+
+
+# Import uuid at the top level for MemoryManager
+import uuid

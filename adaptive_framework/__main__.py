@@ -20,6 +20,8 @@ from .extensions import ExtensionRegistry, GrowthManager
 from .mcp import MCPPlugin
 from .vector_memory import create_vector_memory, VectorMemoryManager
 from .agent_loop import AgentLoopPlugin
+from .building_tools import BuildingTool, BuildingToolPlugin
+from .skills import SkillPlugin, SkillRegistry, SkillExecutor
 from .ai_providers import (
     ProviderRegistry, ProviderFactory, ModelManager, ProviderType,
     ModelInfo, ModelCapability, APIKey, CompletionRequest, CompletionResponse
@@ -66,11 +68,16 @@ class AdaptiveFramework:
         self.building_tool = BuildingTool(self.data_dir / "workspace")
         self.building_plugin: Optional[BuildingToolPlugin] = None
         
+        # Skills System
+        self.skill_registry = SkillRegistry(self.data_dir)
+        self.skill_executor = SkillExecutor(self.framework)
+        self.skill_registry.set_executor(self.skill_executor)
+        
         # Agent loop
         self.agent_loop: Optional[AgentLoopPlugin] = None
         
         # Register built-in plugins
-        # self._register_builtin_plugins()  # Called in start() instead
+        self._register_builtin_plugins()
     
     def _register_builtin_plugins(self):
         """Register all built-in plugins."""
@@ -85,6 +92,54 @@ class AdaptiveFramework:
         
         for plugin in plugins:
             self.framework.register_plugin(plugin)
+    
+    async def start(self):
+        """Start the framework."""
+        # Initialize vector memory
+        try:
+            self.vector_memory = await create_vector_memory(self.data_dir)
+            logger.info("Vector memory initialized")
+        except Exception as e:
+            logger.warning(f"Vector memory not available: {e}")
+        
+        # Initialize AI providers
+        self._register_ai_providers()
+        await self.model_manager.refresh_models()
+        
+        # Initialize agent loop
+        self.agent_loop = AgentLoopPlugin("agent_loop", self.framework, self)
+        self.framework.register_plugin(self.agent_loop)
+        
+        # Initialize building tools plugin
+        self.building_plugin = BuildingToolPlugin("building", self.framework, self.data_dir / "workspace")
+        self.framework.register_plugin(self.building_plugin)
+        
+        # Initialize skills plugin
+        self.skill_plugin = SkillPlugin("skills", self.framework, self.data_dir)
+        self.framework.register_plugin(self.skill_plugin)
+        
+        # Discover and load extensions
+        self.registry.discover_extensions()
+        for name in self.registry.manifests:
+            if self.registry.manifests[name].auto_enable:
+                self.registry.load_extension(name)
+                await self.framework.enable_plugin(name)
+        
+        # Register built-in plugins (including new ones)
+        self._register_builtin_plugins()
+        
+        # Enable core plugins
+        await self.framework.enable_plugin("file_ops")
+        await self.framework.enable_plugin("shell")
+        await self.framework.enable_plugin("memory")
+        await self.framework.enable_plugin("learning")
+        await self.framework.enable_plugin("feedback")
+        await self.framework.enable_plugin("mcp")
+        await self.framework.enable_plugin("agent_loop")
+        await self.framework.enable_plugin("building")
+        await self.framework.enable_plugin("skills")
+        
+        await self.framework.start()
     
     def _register_ai_providers(self):
         """Register default AI providers."""
@@ -135,6 +190,10 @@ class AdaptiveFramework:
         self.building_plugin = BuildingToolPlugin("building", self.framework, self.data_dir / "workspace")
         self.framework.register_plugin(self.building_plugin)
         
+        # Initialize skills plugin
+        self.skill_plugin = SkillPlugin("skills", self.framework, self.data_dir)
+        self.framework.register_plugin(self.skill_plugin)
+        
         # Discover and load extensions
         self.registry.discover_extensions()
         for name in self.registry.manifests:
@@ -154,12 +213,15 @@ class AdaptiveFramework:
         await self.framework.enable_plugin("mcp")
         await self.framework.enable_plugin("agent_loop")
         await self.framework.enable_plugin("building")
+        await self.framework.enable_plugin("skills")
         
         await self.framework.start()
     
     async def stop(self):
         """Stop the framework."""
         await self.framework.stop()
+    
+    # ... (rest of the methods from the original __main__.py)
     
     # High-level API
     
@@ -273,7 +335,7 @@ class AdaptiveFramework:
         self.provider_registry.set_default(provider_type, model)
     
     async def get_available_models(self) -> Dict[str, List[ModelInfo]]:
-        return await self.registry.get_available_models()
+        return await self.provider_registry.get_available_models()
     
     async def recommend_model(self, task: str, budget: float = None, prefer_local: bool = False) -> Optional[ModelInfo]:
         return self.model_manager.recommend_model(task, budget, prefer_local)
@@ -296,7 +358,6 @@ class AdaptiveFramework:
         if not provider:
             raise ValueError(f"Provider not available: {model_info.provider}")
         
-        from .ai_providers import CompletionRequest
         request = CompletionRequest(
             model=model,
             messages=messages,
@@ -315,7 +376,6 @@ class AdaptiveFramework:
         if not provider:
             raise ValueError(f"Provider not available: {model_info.provider}")
         
-        from .ai_providers import CompletionRequest
         request = CompletionRequest(
             model=model,
             messages=messages,
@@ -361,6 +421,109 @@ class AdaptiveFramework:
     
     async def generate_code(self, specification: str, language: str, framework: str = None) -> Dict[str, Any]:
         return await self.building_tool.generate_code(specification, language, framework)
+    
+    # Skill shortcuts
+    
+    async def register_skill(self, skill_data: Dict) -> bool:
+        """Register a new skill."""
+        skill = self.skill_plugin._deserialize_skill(skill_data)
+        return self.skill_registry.register_skill(skill)
+    
+    async def execute_skill(self, skill_id: str, inputs: Dict[str, Any], context: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Execute a skill."""
+        skill = self.skill_registry.get_skill(skill_id)
+        if not skill:
+            return {"success": False, "error": f"Skill not found: {skill_id}"}
+        
+        return await self.skill_executor.execute(skill, inputs, context)
+    
+    def list_skills(self, category: str = None, skill_type: str = None, tags: List[str] = None) -> List[Dict]:
+        """List skills with optional filtering."""
+        cat = SkillCategory(category) if category else None
+        typ = SkillType(skill_type) if skill_type else None
+        tag_set = set(tags) if tags else None
+        
+        skills = self.skill_registry.list_skills(category=cat, skill_type=typ, tags=tag_set)
+        return [self._serialize_skill(s) for s in skills]
+    
+    def search_skills(self, query: str, limit: int = 20) -> List[Dict]:
+        """Search skills by query."""
+        skills = self.skill_registry.search_skills(query, limit)
+        return [self._serialize_skill(s) for s in skills]
+    
+    def get_skill_stats(self) -> Dict[str, Any]:
+        return self.skill_registry.get_skill_stats()
+    
+    def _serialize_skill(self, skill) -> Dict[str, Any]:
+        return {
+            "metadata": {
+                "id": skill.metadata.id,
+                "name": skill.metadata.name,
+                "version": skill.metadata.version,
+                "type": skill.metadata.type.value,
+                "category": skill.metadata.category.value,
+                "author": skill.metadata.author,
+                "created_at": skill.metadata.created_at.isoformat(),
+                "updated_at": skill.metadata.updated_at.isoformat(),
+                "description": skill.metadata.description,
+                "long_description": skill.metadata.long_description,
+                "tags": list(skill.metadata.tags),
+                "dependencies": skill.metadata.dependencies,
+                "required_tools": skill.metadata.required_tools,
+                "required_permissions": skill.metadata.required_permissions,
+                "is_experimental": skill.metadata.is_experimental,
+                "is_deprecated": skill.metadata.is_deprecated,
+                "usage_count": skill.metadata.usage_count,
+                "success_rate": skill.metadata.success_rate,
+                "average_latency_ms": skill.metadata.average_latency_ms,
+            },
+            "parameters": [
+                {
+                    "name": p.name,
+                    "type": p.type.value,
+                    "description": p.description,
+                    "required": p.required,
+                    "default": p.default,
+                    "enum_values": p.enum_values,
+                    "min_value": p.min_value,
+                    "max_value": p.max_value,
+                    "pattern": p.pattern,
+                    "min_length": p.min_length,
+                    "max_length": p.max_length,
+                    "examples": p.examples,
+                }
+                for p in skill.parameters
+            ],
+            "returns": skill.returns,
+            "examples": [
+                {
+                    "name": e.name,
+                    "description": e.description,
+                    "inputs": e.inputs,
+                    "expected_output": e.expected_output,
+                    "explanation": e.explanation,
+                }
+                for e in skill.examples
+            ],
+            "implementation": skill.implementation,
+            "implementation_type": skill.implementation_type,
+            "pre_conditions": skill.pre_conditions,
+            "post_conditions": skill.post_conditions,
+            "side_effects": skill.side_effects,
+            "timeout_seconds": skill.timeout_seconds,
+            "retry_policy": skill.retry_policy,
+            "rate_limit": skill.rate_limit,
+            "cache_ttl_seconds": skill.cache_ttl_seconds,
+            "cache_key_template": skill.cache_key_template,
+        }
+    
+    # Event publishing
+    
+    async def publish(self, event_type: str, payload: dict):
+        await self.framework.event_bus.publish(Event(event_type, payload))
+    
+    def subscribe(self, event_type: str, handler):
+        self.framework.event_bus.subscribe(event_type, handler)
 
 
 # Convenience function

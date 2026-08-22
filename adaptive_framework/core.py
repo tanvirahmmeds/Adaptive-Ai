@@ -59,7 +59,6 @@ class Plugin(ABC):
         self.name = name
         self.framework = framework
         self.enabled = False
-        self._config: Dict[str, Any] = {}
     
     @property
     @abstractmethod
@@ -81,12 +80,6 @@ class Plugin(ABC):
     async def shutdown(self):
         """Cleanup on shutdown."""
         pass
-    
-    def configure(self, config: Dict[str, Any]):
-        self._config = config
-    
-    def get_config(self, key: str, default=None):
-        return self._config.get(key, default)
 
 
 class Framework:

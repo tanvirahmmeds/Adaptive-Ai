@@ -272,68 +272,71 @@ class {name.title().replace(' ', '').replace('-', '')}Plugin(Plugin):
         safe_name = name.lower().replace(' ', '_')
         class_name = name.title().replace(' ', '').replace('-', '')
         
-        workflow_code = '"""' + '\n' + \
-            'Auto-generated workflow: ' + name + '\n' + \
-            '"""' + '\n\n' + \
-            'from adaptive_framework.core import Plugin, Framework, Event\n\n\n' + \
-            'class ' + class_name + 'WorkflowPlugin(Plugin):\n' + \
-            '    """Workflow: ' + name + '"""\n' + \
-            '    \n' + \
-            '    @property\n' + \
-            '    def version(self) -> str:\n' + \
-            '        return "1.0.0"\n' + \
-            '    \n' + \
-            '    @property\n' + \
-            '    def capabilities(self) -> list:\n' + \
-            '        return ["workflow_' + safe_name + '"]\n' + \
-            '    \n' + \
-            '    def __init__(self, name: str, framework: Framework):\n' + \
-            '        super().__init__(name, framework)\n' + \
-            '        self.steps = ' + json.dumps(steps) + '\n' + \
-            '    \n' + \
-            '    async def initialize(self) -> bool:\n' + \
-            '        self.framework.event_bus.subscribe("workflow_' + safe_name + '.execute", self._handle_execute)\n' + \
-            '        return True\n' + \
-            '    \n' + \
-            '    async def shutdown(self):\n' + \
-            '        pass\n' + \
-            '    \n' + \
-            '    async def _handle_execute(self, event: Event):\n' + \
-            '        request_id = event.payload.get("request_id")\n' + \
-            '        context = event.payload.get("context", {})\n' + \
-            '        results = {}\n' + \
-            '        \n' + \
-            '        for i, step in enumerate(self.steps):\n' + \
-            '            action = step.get("action")\n' + \
-            '            params = step.get("parameters", {})\n' + \
-            '            condition = step.get("condition")\n' + \
-            '            \n' + \
-            '            # Check condition\n' + \
-            '            if condition:\n' + \
-            '                # Simple condition evaluation\n' + \
-            '                try:\n' + \
-            '                    if not eval(condition, {"context": context, "results": results}):\n' + \
-            '                        continue\n' + \
-            '                except:\n' + \
-            '                    pass\n' + \
-            '            \n' + \
-            '            # Execute step via event bus\n' + \
-            '            step_event = Event("workflow.step." + str(i), {\n' + \
-            '                "request_id": request_id,\n' + \
-            '                "action": action,\n' + \
-            '                "parameters": params,\n' + \
-            '                "context": context\n' + \
-            '            })\n' + \
-            '            await self.framework.event_bus.publish(step_event)\n' + \
-            '            \n' + \
-            '            # In real implementation, wait for result\n' + \
-            '            results["step_" + str(i)] = {"action": action, "status": "dispatched"}\n' + \
-            '        \n' + \
-            '        result_event_name = "workflow_' + safe_name + '.result"\n' + \
-            '        await self.framework.event_bus.publish(Event(result_event_name, {\n' + \
-            '            "request_id": request_id,\n' + \
-            '            "results": results\n' + \
-            '        }))'
+        workflow_code = f'''"""
+Auto-generated workflow: {name}
+"""
+
+from adaptive_framework.core import Plugin, Framework, Event
+
+
+class {class_name}WorkflowPlugin(Plugin):
+    """Workflow: {name}"""
+    
+    @property
+    def version(self) -> str:
+        return "1.0.0"
+    
+    @property
+    def capabilities(self) -> list:
+        return ["workflow_{safe_name}"]
+    
+    def __init__(self, name: str, framework: Framework):
+        super().__init__(name, framework)
+        self.steps = {json.dumps(steps)}
+    
+    async def initialize(self) -> bool:
+        self.framework.event_bus.subscribe("workflow_{safe_name}.execute", self._handle_execute)
+        return True
+    
+    async def shutdown(self):
+        pass
+    
+    async def _handle_execute(self, event: Event):
+        request_id = event.payload.get("request_id")
+        context = event.payload.get("context", {{}})
+        results = {{}}
+        
+        for i, step in enumerate(self.steps):
+            action = step.get("action")
+            params = step.get("parameters", {{}})
+            condition = step.get("condition")
+            
+            # Check condition
+            if condition:
+                # Simple condition evaluation
+                try:
+                    if not eval(condition, {{"context": context, "results": results}}):
+                        continue
+                except:
+                    pass
+            
+            # Execute step via event bus
+            step_event = Event(f"workflow.step.{{i}}", {{
+                "request_id": request_id,
+                "action": action,
+                "parameters": params,
+                "context": context
+            }})
+            await self.framework.event_bus.publish(step_event)
+            
+            # In real implementation, wait for result
+            results[f"step_{{i}}"] = {{"action": action, "status": "dispatched"}}
+        
+        await self.framework.event_bus.publish(Event("workflow_{safe_name}.result", {{
+            "request_id": request_id,
+            "results": results
+        }}))
+'''
         ext_dir = self.framework.data_dir / "extensions" / f"workflow_{safe_name}"
         ext_dir.mkdir(parents=True, exist_ok=True)
         
@@ -345,7 +348,7 @@ class {name.title().replace(' ', '').replace('-', '')}Plugin(Plugin):
             version="1.0.0",
             description=f"Workflow: {name}",
             author="auto-generated",
-            entry_point=f"workflow_{safe_name}_plugin:{name.title().replace(' ', '').replace('-', '')}WorkflowPlugin",
+            entry_point=f"workflow_{safe_name}_plugin:{class_name}WorkflowPlugin",
             dependencies=[],
             config_schema={},
             auto_enable=False

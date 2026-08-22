@@ -284,8 +284,9 @@ class MCPServer:
     
     async def _handle_write_file(self, args: Dict) -> Dict:
         path = Path(args["path"])
+        content = args["content"]
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(args["content"])
+        path.write_text(content)
         return {"success": True, "path": str(path)}
     
     async def _handle_list_files(self, args: Dict) -> Dict:
@@ -371,10 +372,10 @@ class MCPPlugin(Plugin):
             self.memory = memory_plugin.memory
         else:
             logger.warning("Memory plugin not available")
+            return False
         
         # Create MCP server
-        if self.memory:
-            self.server = MCPServer(self.framework, self.memory)
+        self.server = MCPServer(self.framework, self.memory)
         
         # Subscribe to events
         self.framework.event_bus.subscribe("mcp.connect", self._handle_connect)

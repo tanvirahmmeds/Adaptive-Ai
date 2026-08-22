@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 
-from adaptive_framework import AdaptiveFramework
 from adaptive_framework.core import Plugin, Framework, Event
 from adaptive_framework.memory import MemoryManager, MemoryEntry
 from adaptive_framework.extensions import CapabilityBuilder, GrowthManager
@@ -183,41 +182,13 @@ class PlanningEngine:
     
     def _plan_file_ops(self, goal: Goal, desc: str) -> List[Task]:
         tasks = []
-        
-        # If both "read" and "list" or "all" in description, create a list-then-read sequence
-        if ("read" in desc and ("list" in desc or "all" in desc or "each" in desc)) or \
-           ("list" in desc and "read" in desc):
-            # First list files
-            list_task = Task(
-                id=str(uuid.uuid4())[:8],
-                goal=goal.id,
-                description="List target files",
-                action="file.list",
-                parameters={"path": self._extract_path(desc) or "/data/data/com.termux/files/home/workspace", "pattern": "*.py"},
-                priority=TaskPriority.HIGH,
-                tags={"file_ops", goal.id}
-            )
-            # Then read each file (this will be expanded by the executor)
-            read_task = Task(
-                id=str(uuid.uuid4())[:8],
-                goal=goal.id,
-                description="Read each listed file",
-                action="file.read",
-                parameters={"path": "{{results.step_0.files[0].path}}"},  # Template for first file
-                priority=TaskPriority.HIGH,
-                dependencies=[list_task.id],
-                tags={"file_ops", goal.id}
-            )
-            tasks.extend([list_task, read_task])
-            return tasks
-        
         if "read" in desc:
             tasks.append(Task(
                 id=str(uuid.uuid4())[:8],
                 goal=goal.id,
                 description="Read target file(s)",
                 action="file.read",
-                parameters={"path": self._extract_path(desc) or "/data/data/com.termux/files/home/workspace"},
+                parameters={"path": self._extract_path(desc) or "."},
                 priority=TaskPriority.HIGH,
                 tags={"file_ops", goal.id}
             ))
@@ -237,7 +208,7 @@ class PlanningEngine:
                 goal=goal.id,
                 description="List files in directory",
                 action="file.list",
-                parameters={"path": self._extract_path(desc) or "/data/data/com.termux/files/home/workspace", "pattern": "*"},
+                parameters={"path": self._extract_path(desc) or ".", "pattern": "*"},
                 priority=TaskPriority.NORMAL,
                 tags={"file_ops", goal.id}
             ))
@@ -249,7 +220,7 @@ class PlanningEngine:
             goal=goal.id,
             description="Execute shell command",
             action="shell.execute",
-            parameters={"command": self._extract_command(desc) or "pwd && date"},
+            parameters={"command": self._extract_command(desc) or "echo 'no command specified'"},
             priority=TaskPriority.HIGH,
             tags={"shell_ops", goal.id}
         )]
@@ -294,19 +265,13 @@ class PlanningEngine:
     
     def _extract_path(self, desc: str) -> Optional[str]:
         import re
-        # Try quoted paths first
         match = re.search(r'["\']([^"\']+\.(?:txt|py|md|json|csv))["\']', desc)
         if match:
             return match.group(1)
-        # Try to find directory names after "in", "from", "at"
-        match = re.search(r'(?:in|from|at)\s+(?:the\s+)?(\S+(?:/\S+)*\s*)', desc)
+        match = re.search(r'(?:in|from|at)\s+(\S+)', desc)
         if match:
-            path = match.group(1).strip()
-            # Filter out common stop words
-            if path.lower() not in ["the", "a", "an", "this", "that", "workspace", "directory", "folder"]:
-                return path
-        # Default to workspace
-        return "/data/data/com.termux/files/home/workspace"
+            return match.group(1)
+        return None
     
     def _extract_output_path(self, desc: str) -> Optional[str]:
         import re
@@ -326,28 +291,21 @@ class PlanningEngine:
 class ExecutionEngine:
     """Executes tasks and handles errors/adaptation."""
     
-    def __init__(self, adaptive_framework: AdaptiveFramework, memory: MemoryManager, growth: GrowthManager):
-        self.framework = adaptive_framework
+    def __init__(self, framework: Framework, memory: MemoryManager, growth: GrowthManager):
+        self.framework = framework
         self.memory = memory
         self.growth = growth
         self.running_tasks: Dict[str, Task] = {}
     
     async def execute_task(self, task: Task) -> Dict[str, Any]:
         """Execute a single task with retry logic."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.now()
         self.running_tasks[task.id] = task
         
-        logger.info(f"Starting task {task.id}: {task.action} with params {task.parameters}")
-        
         try:
-            # Execute the action using AdaptiveFramework's execute method
-            logger.info(f"Calling framework.execute for task {task.id}")
+            # Execute the action
             result = await self.framework.execute(task.action, task.parameters, task.context)
-            logger.info(f"Task {task.id} got result: {result}")
             
             # Check for errors
             if result.get("error"):
@@ -360,7 +318,6 @@ class ExecutionEngine:
             # Learn from success
             await self._learn_from_execution(task, success=True)
             
-            logger.info(f"Task {task.id} completed successfully")
             return result
             
         except Exception as e:
@@ -384,8 +341,6 @@ class ExecutionEngine:
     
     async def _adapt_for_retry(self, task: Task, error: Exception):
         """Adapt task parameters based on error."""
-        import logging
-        logger = logging.getLogger(__name__)
         error_str = str(error).lower()
         
         if "not found" in error_str or "no such file" in error_str:
@@ -413,8 +368,6 @@ class ExecutionEngine:
     
     async def _learn_from_execution(self, task: Task, success: bool):
         """Record execution outcome for learning."""
-        import logging
-        logger = logging.getLogger(__name__)
         await self.memory.learn_from_pattern(
             pattern_type="task_execution",
             pattern_data={
@@ -435,8 +388,6 @@ class ExecutionEngine:
     
     async def _store_successful_pattern(self, task: Task):
         """Store successful execution as a reusable pattern."""
-        import logging
-        logger = logging.getLogger(__name__)
         # Check if we already have this pattern
         existing = await self.memory.recall(
             type="pattern",
@@ -468,8 +419,6 @@ class ReflectionEngine:
     """Self-reflection and improvement."""
     
     def __init__(self, framework: Framework, memory: MemoryManager, growth: GrowthManager):
-        import logging
-        self.logger = logging.getLogger(__name__)
         self.framework = framework
         self.memory = memory
         self.growth = growth
@@ -538,13 +487,10 @@ class ReflectionEngine:
             tags={"reflection", goal.id}
         )
         
-        self.logger.info(f"Reflection on goal {goal.id}: {reflection['success_rate']:.1%} success rate")
         return reflection
     
     async def propose_improvements(self) -> List[Dict[str, Any]]:
         """Propose system improvements based on accumulated experience."""
-        import logging
-        logger = logging.getLogger(__name__)
         # Get all reflections
         reflections = await self.memory.recall(type="reflection", min_confidence=0.5)
         
@@ -583,16 +529,14 @@ class ReflectionEngine:
                         "suggestion": f"Consider disabling unused plugin: {name}"
                     })
         
-        logger.info(f"Proposed {len(improvements)} improvements")
         return improvements
 
 
 class AutonomousAgent(Plugin):
     """Main autonomous agent plugin."""
     
-    def __init__(self, name: str, framework: Framework, adaptive_framework: AdaptiveFramework = None):
+    def __init__(self, name: str, framework: Framework):
         super().__init__(name, framework)
-        self.adaptive_framework = adaptive_framework
         self.memory: Optional[MemoryManager] = None
         self.growth: Optional[GrowthManager] = None
         self.planner: Optional[PlanningEngine] = None
@@ -624,8 +568,6 @@ class AutonomousAgent(Plugin):
     
     async def initialize(self) -> bool:
         # Get dependencies
-        import logging
-        logger = logging.getLogger(__name__)
         memory_plugin = self.framework.get_plugin("memory")
         if memory_plugin and hasattr(memory_plugin, 'memory'):
             self.memory = memory_plugin.memory
@@ -646,7 +588,7 @@ class AutonomousAgent(Plugin):
         self.growth = GrowthManager(self.framework, self.memory, registry)
         
         self.planner = PlanningEngine(self.framework, self.memory)
-        self.executor = ExecutionEngine(self.adaptive_framework, self.memory, self.growth)
+        self.executor = ExecutionEngine(self.framework, self.memory, self.growth)
         self.reflector = ReflectionEngine(self.framework, self.memory, self.growth)
         
         # Subscribe to events

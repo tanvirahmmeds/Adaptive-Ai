@@ -284,8 +284,7 @@ class FaissVectorStore(VectorStore):
                 'next_idx': self._next_idx
             }, f)
     
-    def _normalize(self, vec: List[float]):
-        import numpy as np
+    def _normalize(self, vec: List[float]) -> np.ndarray:
         arr = np.array(vec, dtype=np.float32)
         norm = np.linalg.norm(arr)
         if norm > 0:
@@ -293,7 +292,6 @@ class FaissVectorStore(VectorStore):
         return arr
     
     async def add(self, entries: List[VectorEntry]):
-        import numpy as np
         vectors = []
         for entry in entries:
             idx = self._next_idx
@@ -314,7 +312,6 @@ class FaissVectorStore(VectorStore):
             self._save()
     
     async def search(self, query_vector: List[float], limit: int = 10, threshold: float = 0.5) -> List[Tuple[VectorEntry, float]]:
-        import numpy as np
         if self.index.ntotal == 0:
             return []
         

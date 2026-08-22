@@ -17,7 +17,7 @@ async def demo_autonomous_agent():
     
     try:
         # Create and register agent
-        agent = AutonomousAgent("autonomous_agent", fw.framework, fw)
+        agent = AutonomousAgent("autonomous_agent", fw.framework)
         fw.framework.register_plugin(agent)
         await fw.framework.enable_plugin("autonomous_agent")
         
@@ -100,7 +100,7 @@ async def demo_continuous_agent():
     fw = await create_framework("/data/data/com.termux/files/home/workspace/agent_continuous")
     
     try:
-        agent = AutonomousAgent("autonomous_agent", fw.framework, fw)
+        agent = AutonomousAgent("autonomous_agent", fw.framework)
         fw.framework.register_plugin(agent)
         await fw.framework.enable_plugin("autonomous_agent")
         await agent.start_agent_loop()

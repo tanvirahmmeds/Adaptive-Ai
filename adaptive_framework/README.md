@@ -156,7 +156,7 @@ await fw.create_capability(
 # From workflow steps
 steps = [
     {"action": "file.list", "parameters": {"path": ".", "pattern": "*.py"}},
-    {"action": "shell.execute", "parameters": {"command": "python -m py_compile {{results.step_0.files[0].path}}"}}
+    {"action": "shell.execute", "parameters": {"command": "python -m py_compile {{results.step_0.files[0].path}}"}
 ]
 await fw.growth.builder.create_workflow_from_steps("lint_python", steps)
 ```

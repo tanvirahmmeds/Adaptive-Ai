@@ -4,7 +4,7 @@ Demo script showing how to use the Adaptive Framework.
 
 import asyncio
 from pathlib import Path
-from adaptive_framework import AdaptiveFramework, create_framework
+from adaptive_framework import create_framework
 
 
 async def demo_basic_usage():
@@ -153,12 +153,37 @@ async def demo_workflow():
         await fw.stop()
 
 
+async def demo_autonomous_agent():
+    """Demo the autonomous agent."""
+    print("\n=== Autonomous Agent Demo ===")
+    
+    fw = await create_framework("/data/data/com.termux/files/home/workspace/agent_demo")
+    
+    try:
+        # Create and start agent
+        agent = fw.agent_loop.agent
+        await agent.run({
+            "description": "List all Python files in workspace",
+            "success_criteria": ["List of Python files displayed"]
+        })
+        
+        # Check results
+        state = agent.get_state()
+        print(f"Agent status: {state['status']}")
+        for task in state['tasks']:
+            print(f"  Task: {task['description']} - {task['status']}")
+        
+    finally:
+        await fw.stop()
+
+
 async def main():
     """Run all demos."""
     await demo_basic_usage()
     await demo_growth()
     await demo_extension()
     await demo_workflow()
+    # await demo_autonomous_agent()  # Uncomment to test agent
     print("\n=== All demos completed ===")
 
 
