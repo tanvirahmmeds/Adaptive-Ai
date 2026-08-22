@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # Main Adaptive Framework Web UI
+  adaptive-web:
+    build: .
+    container_name: adaptive-web
+    ports:
+      - "8080:8080"
+    volumes:
+      - adaptive-data:/home/adaptive/.adaptive_framework
+      - ./adaptive_framework:/home/adaptive/adaptive_framework:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ADAPTIVE_DATA_DIR=/home/adaptive/.adaptive_framework
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Adaptive Framework CLI (for running agents)
+  adaptive-cli:
+    build: .
+    container_name: adaptive-cli
+    volumes:
+      - adaptive-data:/home/adaptive/.adaptive_framework
+      - ./adaptive_framework:/home/adaptive/adaptive_framework:ro
+      - ${PWD}/workspace:/workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ADAPTIVE_DATA_DIR=/home/adaptive/.adaptive_framework
+    entrypoint: ["adaptive"]
+    command: ["doctor"]
+    profiles:
+      - cli
+
+  # MCP Server (example: filesystem)
+  mcp-filesystem:
+    image: mcp/filesystem:latest
+    container_name: mcp-filesystem
+    volumes:
+      - ${PWD}/workspace:/workspace:ro
+    command: ["node", "/mcp-server-filesystem/index.js", "/workspace"]
+    restart: unless-stopped
+    profiles:
+      - mcp
+
+  # MCP Server (example: git)
+  mcp-git:
+    image: mcp/git:latest
+    container_name: mcp-git
+    volumes:
+      - ${PWD}/workspace:/workspace
+    command: ["node", "/mcp-server-git/index.js", "/workspace"]
+    restart: unless-stopped
+    profiles:
+      - mcp
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: adaptive-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    profiles:
+      - cache
+
+  # PostgreSQL for persistent storage (optional)
+  postgres:
+    image: postgres:15-alpine
+    container_name: adaptive-postgres
+    environment:
+      POSTGRES_DB: adaptive
+      POSTGRES_USER: adaptive
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adaptive}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    profiles:
+      - db
+
+volumes:
+  adaptive-data:
+  redis-data:
+  postgres-data:
+
+networks:
+  default:
+    name: adaptive-network

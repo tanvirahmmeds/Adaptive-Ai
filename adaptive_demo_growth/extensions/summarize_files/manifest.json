@@ -1,0 +1,10 @@
+{
+  "name": "summarize_files",
+  "version": "1.0.0",
+  "description": "Summarize all text files in a directory",
+  "author": "auto-generated",
+  "entry_point": "summarize_files_plugin:Summarize_FilesPlugin",
+  "dependencies": [],
+  "config_schema": {},
+  "auto_enable": false
+}

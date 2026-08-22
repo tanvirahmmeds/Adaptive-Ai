@@ -1,0 +1,14 @@
+{
+    "name": "autonomous_agent",
+    "version": "1.0.0",
+    "description": "Full autonomous AI agent with goal-setting, planning, execution, and self-improvement",
+    "author": "adaptive_framework",
+    "entry_point": "agent:AutonomousAgent",
+    "dependencies": ["memory", "learning", "feedback"],
+    "config_schema": {
+        "auto_start_loop": true,
+        "reflection_interval": 300,
+        "max_concurrent_tasks": 3
+    },
+    "auto_enable": false
+}

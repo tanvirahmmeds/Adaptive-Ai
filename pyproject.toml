@@ -1,0 +1,117 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adaptive-framework"
+version = "0.1.0"
+description = "Adaptive AI Framework - Self-improving agent with MCP, vector memory, and autonomous capabilities"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Adaptive Framework Team", email = "team@adaptive-framework.dev"}
+]
+keywords = ["ai", "agent", "autonomous", "mcp", "vector-memory", "self-improving"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "pyyaml>=6.0",
+    "aiofiles>=23.0",
+    "watchdog>=3.0",
+    "rich>=13.0",
+    "click>=8.0",
+    "httpx>=0.25",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+# Web UI dependencies
+web = [
+    "fastapi>=0.100",
+    "uvicorn>=0.23",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.6",
+    "sse-starlette>=2.0",
+]
+
+# Vector memory with ML
+ml = [
+    "sentence-transformers>=2.2",
+    "numpy>=1.24",
+    "faiss-cpu>=1.7",
+]
+
+# Desktop GUI
+gui = [
+    "pyqt6>=6.5",
+    "pyqtwebengine>=6.5",
+]
+
+# All optional dependencies
+all = [
+    "fastapi>=0.100",
+    "uvicorn>=0.23",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.6",
+    "sse-starlette>=2.0",
+    "sentence-transformers>=2.2",
+    "numpy>=1.24",
+    "faiss-cpu>=1.7",
+    "pyqt6>=6.5",
+    "pyqtwebengine>=6.5",
+]
+
+# Development dependencies
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+
+[project.scripts]
+adaptive = "adaptive_framework.cli:main"
+adaptive-web = "adaptive_framework.webui:main"
+adaptive-gui = "adaptive_framework.gui:main"
+adaptive-agent = "adaptive_framework.agent_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["adaptive_framework*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.yml", "*.json", "*.html", "*.css", "*.js", "*.md"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

@@ -1,0 +1,10 @@
+{
+  "name": "my_custom_tool",
+  "version": "0.1.0",
+  "description": "A custom tool for specific tasks",
+  "author": "user",
+  "entry_point": "my_custom_tool_plugin:MyCustomToolPlugin",
+  "dependencies": [],
+  "config_schema": {},
+  "auto_enable": false
+}

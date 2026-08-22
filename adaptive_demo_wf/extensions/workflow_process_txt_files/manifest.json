@@ -1,0 +1,10 @@
+{
+  "name": "workflow_process_txt_files",
+  "version": "1.0.0",
+  "description": "Workflow: process_txt_files",
+  "author": "auto-generated",
+  "entry_point": "workflow_process_txt_files_plugin:Process_Txt_FilesWorkflowPlugin",
+  "dependencies": [],
+  "config_schema": {},
+  "auto_enable": false
+}
