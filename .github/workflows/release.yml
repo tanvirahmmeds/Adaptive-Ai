@@ -1,0 +1,238 @@
+name: Release Automation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.2.3)'
+        required: true
+        type: string
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  check-version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.determine-version.outputs.version }}
+      should-release: ${{ steps.determine-version.outputs.should-release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: determine-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "should-release=true" >> $GITHUB_OUTPUT
+          else
+            # Auto-determine version from commit messages or use semantic-release
+            # For now, use a simple patch increment
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            echo "Latest tag: $LATEST_TAG"
+            
+            # Simple semantic versioning - increment patch
+            VERSION=$(echo $LATEST_TAG | sed 's/^v//' | awk -F. '{print "v"$1"."$2"."$3+1}')
+            echo "Auto-determined version: $VERSION"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "should-release=true" >> $GITHUB_OUTPUT
+          fi
+
+  test-and-build:
+    name: Test & Build
+    needs: check-version
+    if: needs.check-version.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '1.7.1'
+
+      - name: Install dependencies
+        run: poetry install --with dev,test
+
+      - name: Run lint
+        run: |
+          poetry run ruff check adaptive_framework/ tests/
+          poetry run ruff format --check adaptive_framework/ tests/
+          poetry run mypy adaptive_framework/
+
+      - name: Run tests
+        run: |
+          poetry run pytest --cov=adaptive_framework --cov-report=xml
+
+      - name: Validate skills
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from adaptive_framework.skills import SkillRegistry, SkillExecutor
+          from adaptive_framework.core import Framework
+          import asyncio
+          
+          async def validate():
+              fw = Framework('/tmp/test')
+              registry = SkillRegistry(fw.data_dir)
+              executor = SkillExecutor(fw)
+              registry.set_executor(executor)
+              
+              skills = registry.list_skills()
+              print(f'Validating {len(skills)} skills...')
+              
+              for skill in skills:
+                  assert skill.metadata.id
+                  assert skill.metadata.name
+                  assert skill.metadata.version
+              print('All skills valid!')
+          
+          asyncio.run(validate())
+        shell: bash
+
+      - name: Build package
+        run: |
+          poetry build
+
+      - name: Verify package
+        run: |
+          pip install dist/*.whl
+          python -c "import adaptive_framework; print('Import successful')"
+          adaptive-framework doctor
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  create-release:
+    name: Create Release
+    needs: [check-version, test-and-build]
+    if: needs.check-version.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-version.outputs.version }}
+          name: Release ${{ needs.check-version.outputs.version }}
+          body: |
+            ## Adaptive Framework ${{ needs.check-version.outputs.version }}
+            
+            ### Changes
+            - See commit history for detailed changes
+            
+            ### Installation
+            ```bash
+            pip install adaptive-framework==${{ needs.check-version.outputs.version }}
+            ```
+            
+            ### Quick Start
+            ```bash
+            # Install
+            pip install adaptive-framework
+            
+            # Run autonomous agent
+            adaptive-agent run "your goal here"
+            
+            # Start Web UI
+            adaptive-web
+            
+            # Start Desktop GUI
+            adaptive-gui
+            ```
+            
+            ### Skills
+            - 8 built-in skills available
+            - Create custom skills with `adaptive skill create`
+            - See [SKILLS_GUIDE.md](SKILLS_GUIDE.md)
+            
+            ### Interfaces
+            - CLI: `adaptive` / `adaptive-agent`
+            - Web UI: `adaptive-web` (requires fastapi extra)
+            - Desktop GUI: `adaptive-gui` (requires pyqt6 extra)
+            
+            ### Full Changelog
+            See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+          draft: false
+          prerelease: false
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          generate_release_notes: true
+
+      - name: Publish to PyPI
+        if: env.PYPI_API_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages_dir: dist/
+
+      - name: Update latest release tag
+        run: |
+          git tag -f latest ${{ needs.check-version.outputs.version }}
+          git push origin -f refs/tags/latest
+
+  notify:
+    name: Notify on Release
+    needs: create-release
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify success
+        run: |
+          echo "✅ Release ${{ needs.check-version.outputs.version }} published successfully!"
+          echo "View at: https://github.com/Tnvmac-LLC/Adaptive-Ai/releases/tag/${{ needs.check-version.outputs.version }}"
+          # Add Slack/Discord webhook here if needed
+
+  notify-failure:
+    name: Notify on Failure
+    needs: [check-version, test-and-build, create-release]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify failure
+        run: |
+          echo "❌ Release failed. Check GitHub Actions for details."
+          # Add Slack/Discord webhook here if needed

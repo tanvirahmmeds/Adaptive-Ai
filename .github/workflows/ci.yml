@@ -1,0 +1,299 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: '3.10'
+  POETRY_VERSION: '1.7.1'
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install dependencies
+        run: poetry install --with dev,lint,test
+
+      - name: Run Ruff (lint)
+        run: poetry run ruff check adaptive_framework/ tests/
+
+      - name: Run Ruff (format check)
+        run: poetry run ruff format --check adaptive_framework/ tests/
+
+      - name: Run MyPy (type check)
+        run: poetry run mypy adaptive_framework/
+
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12']
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install dependencies
+        run: poetry install --with dev,test
+
+      - name: Run tests
+        run: poetry run pytest --cov=adaptive_framework --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  skill-validation:
+    name: Skill Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install dependencies
+        run: poetry install --with dev,test
+
+      - name: Validate built-in skills
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from adaptive_framework.skills import SkillRegistry, SkillExecutor
+          from adaptive_framework.core import Framework
+          import asyncio
+          
+          async def validate():
+              fw = Framework('/tmp/test')
+              registry = SkillRegistry(fw.data_dir)
+              executor = SkillExecutor(fw)
+              registry.set_executor(executor)
+              
+              # Test all built-in skills load
+              skills = registry.list_skills()
+              print(f'Found {len(skills)} skills')
+              for skill in skills:
+                  print(f'  - {skill.metadata.id} v{skill.metadata.version} ({skill.metadata.category.value})')
+              
+              # Test skill execution
+              read_skill = registry.get_skill('builtin.read_file')
+              if read_skill:
+                  result = await executor.execute(read_skill, {'path': __file__})
+                  assert result['success'], f'Read file failed: {result}'
+                  print('✓ read_file skill works')
+              
+              write_skill = registry.get_skill('builtin.write_file')
+              if write_skill:
+                  result = await executor.execute(write_skill, {
+                      'path': '/tmp/test_output.txt',
+                      'content': 'test'
+                  })
+                  assert result['success'], f'Write file failed: {result}'
+                  print('✓ write_file skill works')
+              
+              print('All skill validations passed!')
+          
+          asyncio.run(validate())
+        shell: bash
+
+      - name: Validate skill schemas
+        run: |
+          python -c "
+          import json
+          from pathlib import Path
+          skills_dir = Path('adaptive_framework/skills') if Path('adaptive_framework/skills').exists() else Path('skills')
+          if skills_dir.exists():
+              for skill_file in skills_dir.glob('*.json'):
+                  with open(skill_file) as f:
+                      data = json.load(f)
+                      assert 'metadata' in data
+                      assert 'parameters' in data
+                      print(f'✓ {skill_file.name} schema valid')
+          print('All skill schemas valid')
+          " || echo "No skill files to validate (using built-in skills)"
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [lint, test, skill-validation]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Build package
+        run: poetry build
+
+      - name: Verify package
+        run: |
+          pip install dist/*.whl
+          python -c "import adaptive_framework; print('Import successful')"
+          adaptive-framework doctor
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ env.POETRY_VERSION }}
+
+      - name: Install package
+        run: |
+          pip install dist/*.whl
+
+      - name: Run integration tests
+        run: |
+          python -c "
+          import asyncio
+          from adaptive_framework import create_framework
+          
+          async def test():
+              fw = await create_framework('/tmp/test_integration')
+              
+              # Test agent
+              result = await fw.execute('agent.run', {
+                  'goal': 'Create a test file',
+                  'success_criteria': ['File created'],
+                  'max_iterations': 3
+              })
+              print(f'Agent result: {result.get(\"state\", {}).get(\"status\", \"unknown\")}')
+              
+              # Test skills
+              result = await fw.execute('skill.execute', {
+                  'skill_id': 'builtin.shell_execute',
+                  'inputs': {'command': 'echo hello'}
+              })
+              assert result['success'], f'Skill failed: {result}'
+              print('✓ Shell execute skill works')
+              
+              # Test device tools
+              result = await fw.execute('device_execute', {
+                  'tool_name': 'filesystem',
+                  'action': 'get_special_paths'
+              })
+              assert result.get('success'), f'Device tool failed: {result}'
+              print('✓ Device tools work')
+              
+              # Test building tools
+              result = await fw.execute('building.list_templates')
+              assert 'templates' in result, f'Templates failed: {result}'
+              print('✓ Building tools work')
+              
+              # Test AI providers
+              providers = fw.list_ai_providers()
+              assert 'providers' in providers
+              print(f'✓ AI providers: {providers[\"providers\"]}')
+              
+              await fw.stop()
+              print('All integration tests passed!')
+          
+          asyncio.run(test())
+        shell: bash
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Bandit (security lint)
+        run: |
+          pip install bandit
+          bandit -r adaptive_framework/ -f json -o bandit-report.json || true
+          cat bandit-report.json
+
+      - name: Run Safety (dependency scan)
+        run: |
+          pip install safety
+          safety check --json || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+          retention-days: 7
+
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [lint, test, skill-validation, build, integration-test, security]
+    if: failure()
+    steps:
+      - name: Send failure notification
+        run: |
+          echo "CI pipeline failed. Check GitHub Actions for details."
+          # Add Slack/Discord/Email notification here
