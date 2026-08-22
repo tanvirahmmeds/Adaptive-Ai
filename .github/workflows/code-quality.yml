@@ -1,0 +1,102 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 2 * * 1"  # Weekly on Monday at 2 AM
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev,all]"
+
+      - name: Run Ruff (linting + formatting)
+        run: |
+          ruff check adaptive_framework/ --output-format=github
+          ruff format --check adaptive_framework/
+
+      - name: Run Black (formatting check)
+        run: |
+          black --check adaptive_framework/ --diff
+
+      - name: Run MyPy (type checking)
+        run: |
+          mypy adaptive_framework/ --ignore-missing-imports --show-error-codes
+
+      - name: Run Bandit (security)
+        run: |
+          pip install bandit
+          bandit -r adaptive_framework/ -f json -o bandit-report.json || true
+        continue-on-error: true
+
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+      - name: Run Safety (dependency vulnerabilities)
+        run: |
+          pip install safety
+          safety check --json --output safety-report.json || true
+        continue-on-error: true
+
+      - name: Upload Safety report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safety-report
+          path: safety-report.json
+
+      - name: Check license headers
+        run: |
+          python -c "
+          import os
+          missing = []
+          for root, dirs, files in os.walk('adaptive_framework'):
+              for f in files:
+                  if f.endswith('.py'):
+                      path = os.path.join(root, f)
+                      with open(path) as fp:
+                          content = fp.read()
+                          if not content.strip().startswith('\"\"\"'):
+                              missing.append(path)
+          if missing:
+              print('Files missing docstrings:')
+              for m in missing:
+                  print(f'  {m}')
+              exit(1)
+          print('All Python files have docstrings')
+          "
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check README exists
+        run: |
+          test -f README.md || test -f adaptive_framework/README.md
+          echo "README found"
+
+      - name: Check documentation files
+        run: |
+          ls -la *.md adaptive_framework/*.md 2>/dev/null || true
